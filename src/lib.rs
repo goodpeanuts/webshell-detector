@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 pub mod db;
 pub mod engine;
+pub mod schema;
 
 pub fn run() {
     let mut engine = ScanEngine::new();

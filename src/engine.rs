@@ -1,5 +1,6 @@
 use crate::db::*;
-use diesel::{prelude::*, sql_query, sqlite::SqliteConnection};
+use crate::schema::{preg::dsl as preg_dsl, token::dsl as token_dsl};
+use diesel::{prelude::*, sqlite::SqliteConnection};
 use dotenvy::dotenv;
 use md5::compute;
 use regex::Regex;
@@ -38,6 +39,7 @@ impl ScanEngine {
     fn establish_connection(&self) -> SqliteConnection {
         dotenv().ok();
         let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+        assert!(Path::new(&database_url).exists(), "Database file not found");
         SqliteConnection::establish(&database_url)
             .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
     }
@@ -45,11 +47,11 @@ impl ScanEngine {
     pub fn load_rules(&mut self) -> Result<(), diesel::result::Error> {
         let mut conn = self.establish_connection();
 
-        // Load tokens
-        self.tokens = sql_query("SELECT token, len, level FROM Token").load(&mut conn)?;
+        // Load tokens using Diesel's query DSL
+        self.tokens = token_dsl::token.load::<Token>(&mut conn)?;
 
-        // Load regex patterns
-        self.pregs = sql_query("SELECT preg, level FROM Preg").load(&mut conn)?;
+        // Load regex patterns using Diesel's query DSL
+        self.pregs = preg_dsl::preg.load::<Preg>(&mut conn)?;
 
         Ok(())
     }

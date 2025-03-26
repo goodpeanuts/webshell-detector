@@ -20,7 +20,7 @@ pub fn run() {
     );
 
     // Scan directory with specific extensions
-    let scan_dir = PathBuf::from("./scan_path");
+    let scan_dir = PathBuf::from("./dataset");
     let extensions = ["php", "asp", "aspx", "jsp", "html"];
 
     if let Err(e) = engine.scan_directory(&scan_dir, extensions.to_vec().as_ref()) {

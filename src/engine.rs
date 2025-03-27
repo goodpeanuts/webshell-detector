@@ -3,38 +3,43 @@ use crate::{
     entry::{collect_entries_to_check, EntryStatus, ScanEntry},
     task::ScanTask,
 };
+use clap::ArgEnum;
 use diesel::prelude::*;
 
 #[allow(unused)]
-#[derive(PartialEq, Eq)]
-enum ScanMod {
+#[derive(PartialEq, Eq, ArgEnum, Clone, Copy, Debug)]
+pub enum ScanMod {
     Quick,
     Complete,
     Ai,
 }
 
 pub struct ScanEngine {
-    running_mod: ScanMod,
+    scan_mod: ScanMod,
     tokens: Vec<db::Token>,
     pregs: Vec<db::Preg>,
 }
 
 impl Default for ScanEngine {
     fn default() -> Self {
-        Self::new()
+        ScanEngine {
+            scan_mod: ScanMod::Quick,
+            tokens: Vec::new(),
+            pregs: Vec::new(),
+        }
     }
 }
 
 impl ScanEngine {
-    pub fn new() -> Self {
+    pub fn new(scan_mod: ScanMod) -> Self {
         ScanEngine {
-            running_mod: ScanMod::Quick,
+            scan_mod,
             tokens: Vec::new(),
             pregs: Vec::new(),
         }
     }
 
-    pub fn run(&mut self) -> Result<(), String> {
+    pub fn run(&mut self, scan_path: std::path::PathBuf) -> Result<(), String> {
         // Create a ScanTask instance
         let mut task = ScanTask::new();
 
@@ -43,8 +48,7 @@ impl ScanEngine {
             .map_err(|e| format!("Failed to load rules: {}", e))?;
 
         // Initialize entries using scan_directory
-        let scan_dir = std::path::PathBuf::from("./dataset");
-        collect_entries_to_check(&scan_dir, &mut task).map_err(|e| e.to_string())?;
+        collect_entries_to_check(&scan_path, &mut task).map_err(|e| e.to_string())?;
 
         // Process entries by calling scan_file
         self.scan(&mut task);
@@ -73,7 +77,7 @@ impl ScanEngine {
     }
 
     fn scan(&self, task: &mut ScanTask) {
-        match self.running_mod {
+        match self.scan_mod {
             ScanMod::Quick => {
                 for entry in &mut task.entries {
                     self.scan_file_quick(entry);

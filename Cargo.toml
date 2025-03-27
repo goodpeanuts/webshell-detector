@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1"
 diesel = { version = "2.2.8", features = ["sqlite"] }
 dotenvy = "0.15"
 md5 = "0.7.0"
@@ -12,3 +13,4 @@ hex = "0.4.3"
 rusqlite = { version = "0.31", features = ["bundled"] }
 log = "0.4"
 env_logger = "0.10"
+clap = { version = "3.0", features = ["derive"] }

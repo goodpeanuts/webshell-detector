@@ -38,7 +38,6 @@ pub(crate) struct Preg {
 }
 
 pub fn establish_connection() -> SqliteConnection {
-    dotenvy::dotenv().ok();
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     assert!(
         std::path::Path::new(&database_url).exists(),

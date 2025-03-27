@@ -110,7 +110,7 @@ impl ScanEngine {
                     EntryStatus::Normal
                 };
                 log::info!(
-                    "Scanned [{}]  file {:?}: Warning level: {}, MD5 matches: {}, Preg matches: {}",
+                    "{} file {:?}: Warning level: {}, MD5 matches: {}, Preg matches: {}",
                     entry.status,
                     entry.path,
                     entry.md5_matches,

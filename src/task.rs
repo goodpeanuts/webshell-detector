@@ -90,11 +90,11 @@ impl ScanTask {
 
         // Log the updated status
         log::info!(
-            "ScanTask Status {}: \n total file: {} and {file_scaned} files scanned \n Dangers: {}\n  Errors: {}, takes {:?}",
+            "ScanTask Status {} \nFiles scanned: {file_scaned}/{}  \nDangers: {}\nErrors: {}\nTakes {:?}",
             self.running_stutus,
             self.file_count,
-            self.error_count,
             self.danger_count,
+            self.error_count,
             self.duration
         );
     }

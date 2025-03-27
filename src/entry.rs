@@ -34,8 +34,8 @@ pub fn collect_entries_to_check(
     scan_task: &mut ScanTask,
 ) -> std::io::Result<()> {
     scan_directory(dir_path, scan_task)?;
-    log::info!("[*] {} directories scanned", scan_task.dir_count);
-    log::info!("====== Scanning completed ======");
+    log::info!("{} directories scanned", scan_task.dir_count);
+    log::info!("Scanning completed");
     scan_task.refresh_status();
     Ok(())
 }

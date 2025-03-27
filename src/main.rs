@@ -1,5 +1,13 @@
-use webshell_detector::run;
+use webshell_detector::engine::ScanEngine;
+
 
 fn main() {
-    run();
+    dotenvy::dotenv().ok();
+    let mut engine = ScanEngine::new();
+    env_logger::init();
+
+
+    if let Err(e) = engine.run() {
+        eprintln!("Error: {}", e);
+    }
 }

@@ -1,19 +1,13 @@
-use crate::db::{self, preg::dsl as preg_dsl, token::dsl as token_dsl};
-use diesel::prelude::*;
-use md5::compute;
-use regex::Regex;
-use std::{
-    fs::{self, File},
-    io::{self, Read},
+use crate::{
+    db::{self, preg::dsl as preg_dsl, token::dsl as token_dsl},
+    entry::{collect_entries_to_check, EntryStatus, ScanEntry},
+    task::ScanTask,
 };
+use diesel::prelude::*;
 
 pub struct ScanEngine {
-    pub(crate) tokens: Vec<db::Token>,
-    pub(crate) pregs: Vec<db::Preg>,
-    pub(crate) running: bool,
-    pub(crate) file_count: u64,
-    pub(crate) dir_count: u64,
-    pub(crate) error_count: u64,
+    tokens: Vec<db::Token>,
+    pregs: Vec<db::Preg>,
 }
 
 impl Default for ScanEngine {
@@ -27,11 +21,27 @@ impl ScanEngine {
         ScanEngine {
             tokens: Vec::new(),
             pregs: Vec::new(),
-            running: true,
-            file_count: 0,
-            dir_count: 0,
-            error_count: 0,
         }
+    }
+
+    pub fn run(&mut self) -> Result<(), String> {
+        // Create a ScanTask instance
+        let mut task = ScanTask::new();
+
+        // Load rules from database
+        self.load_rules()
+            .map_err(|e| format!("Failed to load rules: {}", e))?;
+
+        // Initialize entries using scan_directory
+        let scan_dir = std::path::PathBuf::from("./dataset");
+        collect_entries_to_check(&scan_dir, &mut task).map_err(|e| e.to_string())?;
+
+        // Process entries by calling scan_file
+        self.scan(&mut task);
+
+        task.task_completed();
+
+        Ok(())
     }
 
     pub fn load_rules(&mut self) -> Result<(), diesel::result::Error> {
@@ -43,83 +53,43 @@ impl ScanEngine {
         // Load regex patterns using Diesel's query DSL
         self.pregs = preg_dsl::preg.load::<db::Preg>(&mut conn)?;
 
+        log::info!(
+            "Loaded {} tokens and {} regex patterns",
+            self.tokens.len(),
+            self.pregs.len()
+        );
+
         Ok(())
     }
 
-    /// - Scan a directory recursively for files with specific extensions.
-    pub fn scan_directory(
-        &mut self,
-        dir_path: &std::path::Path,
-        extensions: &[&str],
-    ) -> io::Result<()> {
-        if !dir_path.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                "Directory not found",
-            ));
+    fn scan(&self, task: &mut ScanTask) {
+        for entry in &mut task.entries {
+            self.scan_file(entry);
         }
-
-        self.dir_count += 1;
-
-        for entry in fs::read_dir(dir_path)? {
-            if !self.running {
-                break;
-            }
-
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                // Recursively scan subdirectory
-                self.scan_directory(&path, extensions)?;
-            } else if path.is_file() {
-                // Check if file extension matches
-                if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if extensions.iter().any(|&e| ext_str == e || e == "*") {
-                        // Scan the file
-                        let warning_level = self.scan_file(&path);
-                        if warning_level > 0 {
-                            println!("Warning level {} in file: {:?}", warning_level, path);
-                        }
-                        self.file_count += 1;
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// - Scan a file for tokens and regex patterns.
     /// - Returns the warning level of the file.
     /// - Warning level is the sum of the levels of matched tokens and patterns.
-    pub fn scan_file(&mut self, file_path: &std::path::Path) -> usize {
-        let mut warning_level = 0usize;
-
+    fn scan_file(&self, entry: &mut ScanEntry) {
         // Open and read file
-        match File::open(file_path) {
+        match std::fs::File::open(&entry.path) {
             Ok(mut file) => {
                 let mut buffer = Vec::new();
-                if file.read_to_end(&mut buffer).is_err() {
-                    self.error_count += 1;
-                    return 0;
+                if std::io::Read::read_to_end(&mut file, &mut buffer).is_err() {
+                    log::error!("read file {:?} failed", entry.path);
+                    entry.status = EntryStatus::Error;
+                    return;
                 }
 
                 // Check MD5 signatures (token-based scanning)
                 for token in &self.tokens {
                     for i in 0..buffer.len().saturating_sub(token.len as usize) {
-                        if !self.running {
-                            break;
-                        }
-
-                        // Calculate MD5 of the chunk
                         let chunk = &buffer[i..(i + token.len as usize)];
-                        let result = format!("{:x}", compute(chunk));
+                        let result = format!("{:x}", md5::compute(chunk));
 
-                        // Compare MD5 hex strings
                         if result == token.token {
-                            warning_level += std::cmp::max(token.level, 0) as usize;
+                            entry.md5_matches += std::cmp::max(token.level, 0) as usize;
                         }
                     }
                 }
@@ -127,23 +97,32 @@ impl ScanEngine {
                 // Check regex patterns
                 let content = String::from_utf8_lossy(&buffer);
                 for preg in &self.pregs {
-                    if let Ok(re) = Regex::new(&preg.preg) {
+                    if let Ok(re) = regex::Regex::new(&preg.preg) {
                         let matches = re.find_iter(&content).count();
-                        warning_level += matches * std::cmp::max(preg.level, 0) as usize;
+                        entry.preg_matches += matches * std::cmp::max(preg.level, 0) as usize;
                     }
                 }
 
-                // AI scan could be implemented here
-                // if warning_level == 0 {
-                //     warning_level = self.ai_scan_file(file_path);
-                // }
+                entry.warning_level = entry.md5_matches + entry.preg_matches;
+                entry.status = if entry.warning_level > 0 {
+                    EntryStatus::Danger
+                } else {
+                    EntryStatus::Normal
+                };
+                log::info!(
+                    "Scanned [{}]  file {:?}: Warning level: {}, MD5 matches: {}, Preg matches: {}",
+                    entry.status,
+                    entry.path,
+                    entry.md5_matches,
+                    entry.preg_matches,
+                    entry.warning_level,
+                );
             }
             Err(_) => {
-                self.error_count += 1;
+                log::error!("open file {:?} failed", entry.path);
+                entry.status = EntryStatus::Error;
             }
         }
-
-        warning_level
     }
 
     #[allow(unused)]

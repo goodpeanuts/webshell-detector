@@ -1,17 +1,15 @@
-use crate::db::*;
-use crate::schema::{preg::dsl as preg_dsl, token::dsl as token_dsl};
-use diesel::{prelude::*, sqlite::SqliteConnection};
-use dotenvy::dotenv;
+use crate::db::{self, preg::dsl as preg_dsl, token::dsl as token_dsl};
+use diesel::prelude::*;
 use md5::compute;
 use regex::Regex;
-use std::env;
-use std::fs::{self, File};
-use std::io::{self, Read};
-use std::path::Path;
+use std::{
+    fs::{self, File},
+    io::{self, Read},
+};
 
 pub struct ScanEngine {
-    pub(crate) tokens: Vec<Token>,
-    pub(crate) pregs: Vec<Preg>,
+    pub(crate) tokens: Vec<db::Token>,
+    pub(crate) pregs: Vec<db::Preg>,
     pub(crate) running: bool,
     pub(crate) file_count: u64,
     pub(crate) dir_count: u64,
@@ -36,29 +34,22 @@ impl ScanEngine {
         }
     }
 
-    fn establish_connection(&self) -> SqliteConnection {
-        dotenv().ok();
-        let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-        assert!(Path::new(&database_url).exists(), "Database file not found");
-        SqliteConnection::establish(&database_url)
-            .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
-    }
-
     pub fn load_rules(&mut self) -> Result<(), diesel::result::Error> {
-        let mut conn = self.establish_connection();
+        let mut conn = db::establish_connection();
 
         // Load tokens using Diesel's query DSL
-        self.tokens = token_dsl::token.load::<Token>(&mut conn)?;
+        self.tokens = token_dsl::token.load::<db::Token>(&mut conn)?;
 
         // Load regex patterns using Diesel's query DSL
-        self.pregs = preg_dsl::preg.load::<Preg>(&mut conn)?;
+        self.pregs = preg_dsl::preg.load::<db::Preg>(&mut conn)?;
 
         Ok(())
     }
 
-    pub(crate) fn scan_directory(
+    /// - Scan a directory recursively for files with specific extensions.
+    pub fn scan_directory(
         &mut self,
-        dir_path: &Path,
+        dir_path: &std::path::Path,
         extensions: &[&str],
     ) -> io::Result<()> {
         if !dir_path.is_dir() {
@@ -100,7 +91,10 @@ impl ScanEngine {
         Ok(())
     }
 
-    fn scan_file(&mut self, file_path: &Path) -> i32 {
+    /// - Scan a file for tokens and regex patterns.
+    /// - Returns the warning level of the file.
+    /// - Warning level is the sum of the levels of matched tokens and patterns.
+    pub fn scan_file(&mut self, file_path: &std::path::Path) -> i32 {
         let mut warning_level = 0;
 
         // Open and read file
@@ -153,7 +147,7 @@ impl ScanEngine {
     }
 
     #[allow(unused)]
-    fn ai_scan_file(&self, file_path: &Path) -> i32 {
+    fn ai_scan_file(&self, file_path: &std::path::Path) -> i32 {
         // This would be the Rust equivalent of the AIScanFile function
         // It would execute a Python script and parse the output
 

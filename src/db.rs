@@ -1,5 +1,21 @@
 use diesel::prelude::*;
-use diesel::Queryable;
+
+table! {
+    token (token_column) {
+        #[sql_name = "token"]
+        token_column -> Text,
+        len -> Integer,
+        level -> Integer,
+    }
+}
+
+table! {
+    preg (preg_column) {
+        #[sql_name = "Preg"]
+        preg_column -> Text,
+        level -> Integer,
+    }
+}
 
 #[allow(dead_code)]
 #[derive(QueryableByName, Debug)]
@@ -19,4 +35,15 @@ pub(crate) struct Token {
 pub(crate) struct Preg {
     pub(crate) preg: String,
     pub(crate) level: i32,
+}
+
+pub fn establish_connection() -> SqliteConnection {
+    dotenvy::dotenv().ok();
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    assert!(
+        std::path::Path::new(&database_url).exists(),
+        "Database file not found"
+    );
+    SqliteConnection::establish(&database_url)
+        .unwrap_or_else(|_| panic!("Error connecting to {}", database_url))
 }

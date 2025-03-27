@@ -94,8 +94,8 @@ impl ScanEngine {
     /// - Scan a file for tokens and regex patterns.
     /// - Returns the warning level of the file.
     /// - Warning level is the sum of the levels of matched tokens and patterns.
-    pub fn scan_file(&mut self, file_path: &std::path::Path) -> i32 {
-        let mut warning_level = 0;
+    pub fn scan_file(&mut self, file_path: &std::path::Path) -> usize {
+        let mut warning_level = 0usize;
 
         // Open and read file
         match File::open(file_path) {
@@ -119,7 +119,7 @@ impl ScanEngine {
 
                         // Compare MD5 hex strings
                         if result == token.token {
-                            warning_level += token.level;
+                            warning_level += std::cmp::max(token.level, 0) as usize;
                         }
                     }
                 }
@@ -129,7 +129,7 @@ impl ScanEngine {
                 for preg in &self.pregs {
                     if let Ok(re) = Regex::new(&preg.preg) {
                         let matches = re.find_iter(&content).count();
-                        warning_level += (matches as i32) * preg.level;
+                        warning_level += matches * std::cmp::max(preg.level, 0) as usize;
                     }
                 }
 

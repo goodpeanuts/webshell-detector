@@ -34,8 +34,8 @@ pub fn collect_entries_to_check(
     scan_task: &mut ScanTask,
 ) -> std::io::Result<()> {
     scan_directory(dir_path, scan_task)?;
-    log::info!("{} directories scanned", scan_task.dir_count);
-    log::info!("Scanning completed");
+    tracing::info!("{} directories scanned", scan_task.dir_count);
+    tracing::info!("Scanning completed");
     scan_task.refresh_status();
     Ok(())
 }
@@ -43,7 +43,7 @@ pub fn collect_entries_to_check(
 /// - Scan a directory recursively for files with specific extensions.
 fn scan_directory(dir_path: &std::path::Path, scan_task: &mut ScanTask) -> std::io::Result<()> {
     if !dir_path.is_dir() {
-        log::error!("Directory not found: {:?}", dir_path);
+        tracing::error!("Directory not found: {:?}", dir_path);
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Directory not found",

@@ -24,7 +24,7 @@ impl fmt::Display for TaskStatus {
 }
 
 pub struct ScanTask {
-    running_stutus: TaskStatus,
+    running_status: TaskStatus,
     pub entries: Vec<ScanEntry>,
     pub extensions: Vec<String>,
     file_count: usize,
@@ -39,7 +39,7 @@ pub struct ScanTask {
 impl Default for ScanTask {
     fn default() -> Self {
         ScanTask {
-            running_stutus: TaskStatus::Running,
+            running_status: TaskStatus::Running,
             entries: Vec::new(),
             extensions: vec![
                 "php".to_string(),
@@ -89,9 +89,9 @@ impl ScanTask {
             .count();
 
         // Log the updated status
-        log::info!(
+        tracing::info!(
             "ScanTask Status {} \nFiles scanned: {file_scaned}/{}  \nDangers: {}\nErrors: {}\nTakes {:?}",
-            self.running_stutus,
+            self.running_status,
             self.file_count,
             self.danger_count,
             self.error_count,
@@ -100,11 +100,11 @@ impl ScanTask {
     }
 
     pub fn task_completed(&mut self) {
-        if self.running_stutus == TaskStatus::Completed {
+        if self.running_status == TaskStatus::Completed {
             return;
         }
         self.end_time = Some(std::time::Instant::now());
-        self.running_stutus = TaskStatus::Completed;
+        self.running_status = TaskStatus::Completed;
         self.refresh_status();
     }
 }

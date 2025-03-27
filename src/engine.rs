@@ -67,7 +67,7 @@ impl ScanEngine {
         // Load regex patterns using Diesel's query DSL
         self.pregs = preg_dsl::preg.load::<db::Preg>(&mut conn)?;
 
-        log::info!(
+        tracing::info!(
             "Loaded {} tokens and {} regex patterns",
             self.tokens.len(),
             self.pregs.len()
@@ -105,7 +105,7 @@ impl ScanEngine {
             Ok(mut file) => {
                 let mut buffer = Vec::new();
                 if std::io::Read::read_to_end(&mut file, &mut buffer).is_err() {
-                    log::error!("read file {:?} failed", entry.path);
+                    tracing::error!("read file {:?} failed", entry.path);
                     entry.status = EntryStatus::Error;
                     return;
                 }
@@ -117,13 +117,13 @@ impl ScanEngine {
                     } else {
                         EntryStatus::Normal
                     };
-                    log::info!(
-                        "{} file {:?}: Warning level: {}, MD5 matches: {}, Preg matches: {}",
+                    tracing::info!(
+                        "{} level: {}, MD5: {}, Preg: {}, file {:?}",
                         entry.status,
-                        entry.path,
                         entry.warning_level,
                         entry.md5_matches,
                         entry.preg_matches,
+                        entry.path,
                     );
                 };
 
@@ -153,9 +153,10 @@ impl ScanEngine {
                         }
                     }
                 }
+                scan_complete(entry);
             }
             Err(_) => {
-                log::error!("open file {:?} failed", entry.path);
+                tracing::error!("open file {:?} failed", entry.path);
                 entry.status = EntryStatus::Error;
             }
         }
@@ -193,7 +194,7 @@ impl ScanEngine {
             Ok(mut file) => {
                 let mut buffer = Vec::new();
                 if std::io::Read::read_to_end(&mut file, &mut buffer).is_err() {
-                    log::error!("read file {:?} failed", entry.path);
+                    tracing::error!("read file {:?} failed", entry.path);
                     entry.status = EntryStatus::Error;
                     return;
                 }
@@ -226,7 +227,7 @@ impl ScanEngine {
                 } else {
                     EntryStatus::Normal
                 };
-                log::info!(
+                tracing::info!(
                     "{} file {:?}: Warning level: {}, MD5 matches: {}, Preg matches: {}",
                     entry.status,
                     entry.path,
@@ -236,7 +237,7 @@ impl ScanEngine {
                 );
             }
             Err(_) => {
-                log::error!("open file {:?} failed", entry.path);
+                tracing::error!("open file {:?} failed", entry.path);
                 entry.status = EntryStatus::Error;
             }
         }

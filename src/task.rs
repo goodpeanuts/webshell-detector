@@ -1,6 +1,5 @@
-use std::fmt;
-
 use crate::entry::{EntryStatus, ScanEntry};
+use std::fmt;
 
 #[allow(unused)]
 #[derive(PartialEq, Eq)]
@@ -25,7 +24,7 @@ impl fmt::Display for TaskStatus {
 
 pub struct ScanTask {
     running_status: TaskStatus,
-    pub entries: Vec<ScanEntry>,
+    entries: Vec<ScanEntry>,
     pub extensions: Vec<String>,
     file_count: usize,
     pub dir_count: usize,
@@ -40,7 +39,7 @@ impl Default for ScanTask {
     fn default() -> Self {
         ScanTask {
             running_status: TaskStatus::Running,
-            entries: Vec::new(),
+            entries: Default::default(),
             extensions: vec![
                 "php".to_string(),
                 "asp".to_string(),
@@ -64,17 +63,23 @@ impl ScanTask {
         Self::default()
     }
 
+    pub fn collect_entries(&mut self, result: Vec<ScanEntry>) {
+        tracing::info!("Collected {} entries", result.len());
+        self.entries.extend(result);
+        self.refresh_status();
+    }
+
     pub fn refresh_status(&mut self) {
         self.file_count = self.entries.len();
         self.error_count = self
             .entries
             .iter()
-            .filter(|e| e.status == EntryStatus::Error)
+            .filter(|entry| entry.status == EntryStatus::Error)
             .count();
         self.danger_count = self
             .entries
             .iter()
-            .filter(|e| e.status == EntryStatus::Danger)
+            .filter(|entry| entry.status == EntryStatus::Danger)
             .count();
         if let Some(end_time) = self.end_time {
             self.duration = end_time.duration_since(self.start_time);
@@ -82,15 +87,15 @@ impl ScanTask {
             self.duration = self.start_time.elapsed();
         }
 
-        let file_scaned = self
+        let files_scanned = self
             .entries
             .iter()
-            .filter(|e| e.status != EntryStatus::Unchecked)
+            .filter(|entry| entry.status != EntryStatus::Unchecked)
             .count();
 
         // Log the updated status
         tracing::info!(
-            "ScanTask Status {} \nFiles scanned: {file_scaned}/{}  \nDangers: {}\nErrors: {}\nTakes {:?}",
+            "ScanTask Status {} \nFiles scanned: {files_scanned}/{}  \nDangers: {}\nErrors: {}\nTakes {:?}",
             self.running_status,
             self.file_count,
             self.danger_count,

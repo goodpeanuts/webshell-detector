@@ -1,20 +1,35 @@
 use crate::{
     db::{self, preg::dsl as preg_dsl, token::dsl as token_dsl},
-    entry::{collect_entries_to_check, EntryStatus, ScanEntry},
+    entry::ScanEntry,
     task::ScanTask,
+    utils::scan_directory,
 };
 use clap::ArgEnum;
 use diesel::prelude::*;
+use std::fmt;
 
 #[allow(unused)]
 #[derive(PartialEq, Eq, ArgEnum, Clone, Copy, Debug)]
 pub enum ScanMod {
-    Quick,
+    Regex,
+    Hash,
     Complete,
     Ai,
 }
 
+impl fmt::Display for ScanMod {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ScanMod::Regex => write!(f, "Regex"),
+            ScanMod::Hash => write!(f, "Hash"),
+            ScanMod::Complete => write!(f, "Complete"),
+            ScanMod::Ai => write!(f, "AI"),
+        }
+    }
+}
+
 pub struct ScanEngine {
+    files: Vec<std::path::PathBuf>,
     scan_mod: ScanMod,
     tokens: Vec<db::Token>,
     pregs: Vec<db::Preg>,
@@ -23,7 +38,8 @@ pub struct ScanEngine {
 impl Default for ScanEngine {
     fn default() -> Self {
         ScanEngine {
-            scan_mod: ScanMod::Quick,
+            files: Vec::new(),
+            scan_mod: ScanMod::Regex,
             tokens: Vec::new(),
             pregs: Vec::new(),
         }
@@ -33,6 +49,7 @@ impl Default for ScanEngine {
 impl ScanEngine {
     pub fn new(scan_mod: ScanMod) -> Self {
         ScanEngine {
+            files: Vec::new(),
             scan_mod,
             tokens: Vec::new(),
             pregs: Vec::new(),
@@ -47,8 +64,8 @@ impl ScanEngine {
         self.load_rules()
             .map_err(|e| format!("Failed to load rules: {}", e))?;
 
-        // Initialize entries using scan_directory
-        collect_entries_to_check(&scan_path, &mut task).map_err(|e| e.to_string())?;
+        self.files = scan_directory(&scan_path, &mut task)
+            .map_err(|e| format!("Failed to scan directory: {}", e))?;
 
         // Process entries by calling scan_file
         self.scan(&mut task);
@@ -78,20 +95,17 @@ impl ScanEngine {
 
     fn scan(&self, task: &mut ScanTask) {
         match self.scan_mod {
-            ScanMod::Quick => {
-                for entry in &mut task.entries {
-                    self.scan_file_quick(entry);
-                }
+            ScanMod::Regex => {
+                task.collect_entries(self.scan_regex_quick(&self.files));
+            }
+            ScanMod::Hash => {
+                task.collect_entries(self.scan_md5_quick(&self.files));
             }
             ScanMod::Complete => {
-                for entry in &mut task.entries {
-                    self.scan_file_complete(entry);
-                }
+                task.collect_entries(self.scan_file_complete(&self.files));
             }
             ScanMod::Ai => {
-                for entry in &mut task.entries {
-                    self.ai_scan_file(&entry.path);
-                }
+                todo!()
             }
         }
     }
@@ -99,33 +113,58 @@ impl ScanEngine {
     /// - Quick scan a file for tokens and regex patterns.
     /// - Once find a match then returns the warning level of the file.
     /// - Warning level is the sum of the levels of matched tokens and patterns.
-    fn scan_file_quick(&self, entry: &mut ScanEntry) {
-        // Open and read file
-        match std::fs::File::open(&entry.path) {
-            Ok(mut file) => {
+    fn scan_regex_quick(&self, files: &[std::path::PathBuf]) -> Vec<ScanEntry> {
+        let mut scan_results = Vec::new();
+        for file_path in files {
+            if let Ok(mut file) = std::fs::File::open(file_path) {
                 let mut buffer = Vec::new();
                 if std::io::Read::read_to_end(&mut file, &mut buffer).is_err() {
-                    tracing::error!("read file {:?} failed", entry.path);
-                    entry.status = EntryStatus::Error;
-                    return;
+                    tracing::error!("read file {:?} failed", file);
+                    scan_results.push(ScanEntry::new_error(file_path.clone()));
                 }
 
-                let scan_complete = |entry: &mut ScanEntry| {
-                    entry.warning_level = entry.md5_matches + entry.preg_matches;
-                    entry.status = if entry.warning_level > 0 {
-                        EntryStatus::Danger
-                    } else {
-                        EntryStatus::Normal
-                    };
+                // Check regex patterns
+                let content = String::from_utf8_lossy(&buffer);
+                for preg in &self.pregs {
+                    if let Ok(re) = regex::Regex::new(&preg.preg) {
+                        let matches = re.find_iter(&content).count();
+                        let preg_matches = matches * std::cmp::max(preg.level, 0) as usize;
+                        scan_results.push(ScanEntry::new_result_entry(
+                            file_path.clone(),
+                            0,
+                            preg_matches,
+                        ));
+                        break;
+                    }
+                }
+
+                if let Some(last_result) = scan_results.last() {
                     tracing::info!(
-                        "{} level: {}, MD5: {}, Preg: {}, file {:?}",
-                        entry.status,
-                        entry.warning_level,
-                        entry.md5_matches,
-                        entry.preg_matches,
-                        entry.path,
+                        "{} file: {:?} Preg matches: {}",
+                        last_result.status,
+                        file_path,
+                        last_result.preg_matches,
                     );
-                };
+                } else {
+                    tracing::error!("No scan results available for file: {:?}", file_path);
+                }
+            } else {
+                tracing::error!("open file {:?} failed", file_path);
+                scan_results.push(ScanEntry::new_error(file_path.clone()));
+            }
+        }
+        scan_results
+    }
+
+    fn scan_md5_quick(&self, files: &[std::path::PathBuf]) -> Vec<ScanEntry> {
+        let mut scan_results = Vec::new();
+        for file_path in files {
+            if let Ok(mut file) = std::fs::File::open(file_path) {
+                let mut buffer = Vec::new();
+                if std::io::Read::read_to_end(&mut file, &mut buffer).is_err() {
+                    tracing::error!("read file {:?} failed", file);
+                    scan_results.push(ScanEntry::new_error(file_path.clone()));
+                }
 
                 // Check MD5 signatures (token-based scanning)
                 for token in &self.tokens {
@@ -134,48 +173,49 @@ impl ScanEngine {
                         let result = format!("{:x}", md5::compute(chunk));
 
                         if result == token.token {
-                            entry.md5_matches += std::cmp::max(token.level, 0) as usize;
-                            scan_complete(entry);
-                            return;
+                            let md5_matches = std::cmp::max(token.level, 0) as usize;
+                            scan_results.push(ScanEntry::new_result_entry(
+                                file_path.clone(),
+                                md5_matches,
+                                0,
+                            ));
+                            break;
                         }
                     }
                 }
 
-                // Check regex patterns
-                let content = String::from_utf8_lossy(&buffer);
-                for preg in &self.pregs {
-                    if let Ok(re) = regex::Regex::new(&preg.preg) {
-                        let matches = re.find_iter(&content).count();
-                        entry.preg_matches += matches * std::cmp::max(preg.level, 0) as usize;
-                        if entry.preg_matches > 0 {
-                            scan_complete(entry);
-                            return;
-                        }
-                    }
+                if let Some(last_result) = scan_results.last() {
+                    tracing::info!(
+                        "{} file: {:?} MD5 matches: {}",
+                        last_result.status,
+                        file_path,
+                        last_result.md5_matches,
+                    );
+                } else {
+                    tracing::error!("No scan results available for file: {:?}", file);
                 }
-                scan_complete(entry);
-            }
-            Err(_) => {
-                tracing::error!("open file {:?} failed", entry.path);
-                entry.status = EntryStatus::Error;
+            } else {
+                tracing::error!("open file {:?} failed", file_path);
+                scan_results.push(ScanEntry::new_error(file_path.clone()));
             }
         }
+        scan_results
     }
 
     #[allow(unused)]
-    fn ai_scan_file(&self, file_path: &std::path::Path) -> i32 {
+    fn ai_scan_file(&self, files: &[std::path::PathBuf]) -> i32 {
         unimplemented!();
-        // This would be the Rust equivalent of the AIScanFile function
+        //     // This would be the Rust equivalent of the AIScanFile function
         // It would execute a Python script and parse the output
 
-        use std::process::Command;
+        // use std::process::Command;
 
-        let path_str = file_path.to_string_lossy();
+        // let path_str = file_path.to_string_lossy();
 
-        let output = Command::new("python")
-            .arg("check.py")
-            .arg(path_str.as_ref())
-            .output();
+        // let output = Command::new("python")
+        //     .arg("check.py")
+        //     .arg(path_str.as_ref())
+        //     .output();
 
         // if let Ok(output) = output {
         //     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -188,16 +228,19 @@ impl ScanEngine {
     /// - Complete scan a file for tokens and regex patterns.
     /// - Returns the warning level of the file.
     /// - Warning level is the sum of the levels of matched tokens and patterns.
-    fn scan_file_complete(&self, entry: &mut ScanEntry) {
-        // Open and read file
-        match std::fs::File::open(&entry.path) {
-            Ok(mut file) => {
+    #[allow(unused)]
+    fn scan_file_complete(&self, files: &[std::path::PathBuf]) -> Vec<ScanEntry> {
+        let mut scan_results = Vec::new();
+        for file_path in files {
+            if let Ok(mut file) = std::fs::File::open(file_path) {
                 let mut buffer = Vec::new();
                 if std::io::Read::read_to_end(&mut file, &mut buffer).is_err() {
-                    tracing::error!("read file {:?} failed", entry.path);
-                    entry.status = EntryStatus::Error;
-                    return;
+                    tracing::error!("read file {:?} failed", file);
+                    scan_results.push(ScanEntry::new_error(file_path.clone()));
                 }
+
+                let mut md5_matches = 0;
+                let mut preg_matches = 0;
 
                 // Check MD5 signatures (token-based scanning)
                 for token in &self.tokens {
@@ -206,7 +249,7 @@ impl ScanEngine {
                         let result = format!("{:x}", md5::compute(chunk));
 
                         if result == token.token {
-                            entry.md5_matches += std::cmp::max(token.level, 0) as usize;
+                            md5_matches += std::cmp::max(token.level, 0) as usize;
                         }
                     }
                 }
@@ -216,31 +259,33 @@ impl ScanEngine {
                 for preg in &self.pregs {
                     if let Ok(re) = regex::Regex::new(&preg.preg) {
                         let matches = re.find_iter(&content).count();
-                        entry.preg_matches += matches * std::cmp::max(preg.level, 0) as usize;
-                        if entry.preg_matches > 0 {}
+                        preg_matches += matches * std::cmp::max(preg.level, 0) as usize;
                     }
                 }
 
-                entry.warning_level = entry.md5_matches + entry.preg_matches;
-                entry.status = if entry.warning_level > 0 {
-                    EntryStatus::Danger
+                scan_results.push(ScanEntry::new_result_entry(
+                    file_path.clone(),
+                    md5_matches,
+                    preg_matches,
+                ));
+
+                if let Some(last_result) = scan_results.last() {
+                    tracing::info!(
+                        "{} file: {:?} MD5 matches: {} Preg matches: {}",
+                        last_result.status,
+                        file_path,
+                        last_result.md5_matches,
+                        last_result.preg_matches,
+                    );
                 } else {
-                    EntryStatus::Normal
-                };
-                tracing::info!(
-                    "{} file {:?}: Warning level: {}, MD5 matches: {}, Preg matches: {}",
-                    entry.status,
-                    entry.path,
-                    entry.warning_level,
-                    entry.md5_matches,
-                    entry.preg_matches,
-                );
-            }
-            Err(_) => {
-                tracing::error!("open file {:?} failed", entry.path);
-                entry.status = EntryStatus::Error;
+                    tracing::error!("No scan results available for file: {:?}", file);
+                }
+            } else {
+                tracing::error!("open file {:?} failed", file_path);
+                scan_results.push(ScanEntry::new_error(file_path.clone()));
             }
         }
+        scan_results
     }
 }
 

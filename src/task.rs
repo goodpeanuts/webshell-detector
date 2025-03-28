@@ -40,13 +40,7 @@ impl Default for ScanTask {
         ScanTask {
             running_status: TaskStatus::Running,
             entries: Default::default(),
-            extensions: vec![
-                "php".to_string(),
-                "asp".to_string(),
-                "aspx".to_string(),
-                "jsp".to_string(),
-                "html".to_string(),
-            ],
+            extensions: vec![],
             file_count: 0,
             dir_count: 0,
             error_count: 0,

@@ -128,13 +128,15 @@ impl ScanEngine {
                 for preg in &self.pregs {
                     if let Ok(re) = regex::Regex::new(&preg.preg) {
                         let matches = re.find_iter(&content).count();
-                        let preg_matches = matches * std::cmp::max(preg.level, 0) as usize;
-                        scan_results.push(ScanEntry::new_result_entry(
-                            file_path.clone(),
-                            0,
-                            preg_matches,
-                        ));
-                        break;
+                        if matches > 0 {
+                            let preg_matches = matches * std::cmp::max(preg.level, 0) as usize;
+                            scan_results.push(ScanEntry::new_result_entry(
+                                file_path.clone(),
+                                0,
+                                preg_matches,
+                            ));
+                            break;
+                        }
                     }
                 }
 
